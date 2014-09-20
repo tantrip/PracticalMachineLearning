@@ -1,0 +1,146 @@
+---
+title: "Writeup"
+author: "tt"
+date: "Friday, September 19, 2014"
+output: html_document
+---
+
+**This is the submission for Practical Machine Learning - Prediction Assignment**
+
+#####Load data
+
+- Let us load both our training and testing groupware files that are downloaded from coursera
+- Do the initial cleanup by setting na values to what we have seen in these files, especially train data
+
+```{r, cache=TRUE}
+trainData = read.csv("pml-training.csv", na.strings=c("", "NA", "NULL"))
+testData = read.csv("pml-testing.csv", na.strings=c("", "NA", "NULL"))
+
+dim(trainData)
+
+```
+
+- Based on preliminary analysis, there are a lot of columns that will not add any value to our predictions
+- They include columns that are very sparse (dense with na values), fillers (X), timestamps, window vars
+- Let us clean them out!
+- First, let us remove any column that is not at least 90% populated
+
+```{r}
+trainData <- trainData[,colSums(is.na(trainData))< 0.9*nrow(trainData)]
+```
+
+- Next, let us remove non value add columns like timestamps, window columns and user names
+
+```{r}
+nonValueAddColumns = c('raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window', 'X', 'user_name')
+trainData <- trainData[, -which(names(trainData) %in% nonValueAddColumns)]
+dim(trainData)
+```
+
+- Great! Now we trimmed the file down from 160 columns to a mere 53
+- Let us load the required libraries
+- Set our seed for reproducability
+
+```{r}
+library(caret)
+library(rpart)
+library(randomForest)
+library(ElemStatLearn)
+library(corrplot)
+set.seed(100)
+```
+
+- Let us apply the random forest and lda models for our classe variable to check for comparison
+- Note: gbm was taking too long so we are sticking to these two models for comparison
+
+```{r, cache=TRUE}
+
+partScheme <- createDataPartition(y=trainData$classe, p=0.6, list=FALSE)
+trainPartition <- trainData[partScheme,]
+testPartition <- trainData[-partScheme,]
+
+#gbmModel <- train(classe ~ ., data=trainPartition, method="gbm")
+ldaModel <- train(classe ~ ., data=trainPartition, method="lda")
+rfModel <- randomForest(classe~.,data=trainPartition)
+#importance(ldaModel)
+#importance(rfModel)
+
+#gbmPred <- predict(gbmModel, testPartition)
+ldaPred <- predict(ldaModel, testPartition)
+rfPred <- predict(rfModel, testPartition)
+
+#confusionMatrix(gbmPred, testPartition$classe)
+confusionMatrix(ldaPred, testPartition$classe)
+confusionMatrix(rfPred, testPartition$classe)
+
+```
+
+- Let us check the accuracy of our random forest model
+
+```{r, cache=TRUE}
+
+accuracy<-c(as.numeric(predict(rfModel,newdata=testPartition[,-ncol(testPartition)])==testPartition$classe))
+accuracy<-sum(accuracy)*100/nrow(testPartition)
+print(accuracy)
+
+```
+
+- Well. Random Forest does a better job at nonlinear features. So as can be expected, its accuracy is **`r accuracy`%!!**
+
+- Let us check the accuracy of lda model
+
+
+```{r, cache=TRUE}
+accuracy<-c(as.numeric(predict(ldaModel,newdata=testPartition[,-ncol(testPartition)])==testPartition$classe))
+accuracy<-sum(accuracy)*100/nrow(testPartition)
+print(accuracy)
+
+
+```
+
+- Well. We did not really expect it to be that low but the lda accuracy is **`r accuracy`%!!**
+
+- Let us check a couple of aspects of our random forest model
+
+- First, let us see what the important features are based on the model we generated. Here are te top 10.
+
+```{r}
+
+randomForestImportance = data.frame(rfModel$importance)
+topFeatures = order(-randomForestImportance$MeanDecreaseGini)
+inImportant = createDataPartition(trainPartition$classe, p = 0.05, list = F)
+featurePlot(trainPartition[inImportant,topFeatures[1:10]],trainPartition$classe[inImportant], plot = "box")
+```
+
+- Let us check the correlation of various variables in our training set
+
+```{r}
+correlationData <- cor(subset(trainPartition, select=-c(classe)))
+corrplot(correlationData, order="hclust", tl.cex=0.5, method="color", insig = "pch", addrect = 10)
+```
+
+- Everything seems to be in line with the rfModel being the best approach to go
+
+- Now let us predict using our model against the test dataset with rf model as its accuracy rate is higher than the lda model
+
+```{r}
+testData <- testData[,-1] # Remove the ID column
+predictions <- predict(rfModel,newdata=testData) #Let us predict away!
+print(predictions)
+```
+
+- Last, but not the least, let us generate the answer files to submit for our assignment using the code provided along with the assignment.
+
+```{r, eval=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./answers/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictions)
+```
+
+- Thats it! We are done with the assignment.
